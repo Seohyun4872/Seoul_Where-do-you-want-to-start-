@@ -22,7 +22,7 @@ function distanceMeters(lat1, lon1, lat2, lon2) {
     const R = 6371000;
     const toRad = d => d * Math.PI / 180;
     const dLat = toRad(lat2 - lat1);
-    const dLon = toRad(lon2 - lon1);
+    const dLon = toRad(lat2 - lon1);
     const a =
         Math.sin(dLat/2)**2 +
         Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
@@ -179,10 +179,10 @@ function drawTop10(top10, homeX, homeY, radiusKm) {
 
     homeLayer.addTo(map);
 
-    // 2) Top10 상권 폴리곤 (folium GeoJson + Popup + Tooltip 대응)
+    // 2) Top10 상권 폴리곤
     const top10Sorted = [...top10].sort((a, b) => a.properties.rank - b.properties.rank);
 
-    top10Sorted.forEach((f, idx) => {
+    top10Sorted.forEach((f) => {
         const rank = f.properties.rank;
         const popupHtml = makePopupHtml(f.properties, rank);
 
@@ -230,7 +230,7 @@ function drawTop10(top10, homeX, homeY, radiusKm) {
 }
 
 // ============================
-// 메인 init
+// 메인 init (⚠ 수정된 버전)
 // ============================
 async function init() {
 
@@ -241,34 +241,65 @@ async function init() {
         maxZoom: 19
     }).addTo(map);
 
-    // 2) 데이터 로드
-    const [areasData, configData, predData, gridData, boundaryData] = await Promise.all([
-        fetch("./data/areas_for_web.geojson").then(r => r.json()),
-        fetch("./data/config.json").then(r => r.json()),
-        fetch("./data/predicted_money_map.json").then(r => r.json()),
-        fetch("./data/grid_250m_4326.geojson").then(r => r.json()),
-        fetch("./data/seoul_boundary_4326.geojson").then(r => r.json())
-    ]);
+    // 2) 최소 필수 데이터 3개 먼저 로드
+    let areasData, configData, predData;
+    try {
+        [areasData, configData, predData] = await Promise.all([
+            fetch("./data/areas_for_web.geojson").then(r => {
+                if (!r.ok) throw new Error("areas_for_web.geojson 로드 실패");
+                return r.json();
+            }),
+            fetch("./data/config.json").then(r => {
+                if (!r.ok) throw new Error("config.json 로드 실패");
+                return r.json();
+            }),
+            fetch("./data/predicted_money_map.json").then(r => {
+                if (!r.ok) throw new Error("predicted_money_map.json 로드 실패");
+                return r.json();
+            }),
+        ]);
+    } catch (e) {
+        console.error("❌ 필수 데이터 로드 중 오류:", e);
+        alert("필수 데이터 파일을 불러오지 못했습니다. console을 확인해 주세요.");
+        return;
+    }
 
     AREAS = areasData.features;
     CONFIG = configData;
     PREDICTED_MAP = predData;
-    GRID_DATA = gridData;
-    BOUNDARY_DATA = boundaryData;
 
-    // 3) 격자 레이어
-    gridLayer = L.geoJSON(GRID_DATA, {
-        style: gridStyleFn,
-        interactive: false
-    }).addTo(map);
+    // 3) 격자 / 경계는 있으면 쓰고, 없으면 경고만 띄우기
+    try {
+        const gridRes = await fetch("./data/grid_250m_4326.geojson");
+        if (gridRes.ok) {
+            GRID_DATA = await gridRes.json();
+            gridLayer = L.geoJSON(GRID_DATA, {
+                style: gridStyleFn,
+                interactive: false
+            }).addTo(map);
+        } else {
+            console.warn("⚠ grid_250m_4326.geojson 없음 (지금은 건너뜀)");
+        }
+    } catch (e) {
+        console.warn("⚠ grid_250m_4326.geojson 로드 실패 (지금은 건너뜀)", e);
+    }
 
-    // 4) 서울 외곽 경계 레이어
-    boundaryLayer = L.geoJSON(BOUNDARY_DATA, {
-        style: seoulBoundaryStyleFn,
-        interactive: false
-    }).addTo(map);
+    try {
+        const boundaryRes = await fetch("./data/seoul_boundary_4326.geojson");
+        if (boundaryRes.ok) {
+            BOUNDARY_DATA = await boundaryRes.json();
+            boundaryLayer = L.geoJSON(BOUNDARY_DATA, {
+                style: seoulBoundaryStyleFn,
+                interactive: false
+            }).addTo(map);
+        } else {
+            console.warn("⚠ seoul_boundary_4326.geojson 없음 (지금은 건너뜀)");
+        }
+    } catch (e) {
+        console.warn("⚠ seoul_boundary_4326.geojson 로드 실패 (지금은 건너뜀)", e);
+    }
 
-    // 5) 드롭다운 채우기
+    // 4) 드롭다운 채우기
     const industrySel = document.getElementById("industry");
     const timeSel = document.getElementById("time");
     const weekdaySel = document.getElementById("weekday");
@@ -302,17 +333,17 @@ async function init() {
         priceSel.appendChild(op);
     });
 
-    // 6) LayerControl 추가 (folium.LayerControl 대응)
-    const overlayMaps = {
-        "Grid (격자)": gridLayer,
-        "서울 외곽 경계": boundaryLayer,
-        "Top10 상권": top10Layer,
-        "TOP1-3 포인터": topPointsLayer,
-        "집/반경": homeLayer
-    };
+    // 5) LayerControl (grid/boundary 없는 경우도 대비)
+    const overlayMaps = {};
+    if (gridLayer) overlayMaps["Grid (격자)"] = gridLayer;
+    if (boundaryLayer) overlayMaps["서울 외곽 경계"] = boundaryLayer;
+    overlayMaps["Top10 상권"] = top10Layer;
+    overlayMaps["TOP1-3 포인터"] = topPointsLayer;
+    overlayMaps["집/반경"] = homeLayer;
+
     L.control.layers(null, overlayMaps, { collapsed: false }).addTo(map);
 
-    // 7) 버튼 클릭 이벤트
+    // 6) 버튼 클릭 이벤트 (조금 더 견고하게)
     document.getElementById("runBtn").addEventListener("click", () => {
 
         const widgets = {
@@ -322,23 +353,60 @@ async function init() {
             price: priceSel.value,
         };
 
-        const homeX = parseFloat(document.getElementById("homeX").value);
-        const homeY = parseFloat(document.getElementById("homeY").value);
-        const radiusKm = parseFloat(document.getElementById("radius").value);
-
         let top10 = filterAreasForTop10(widgets);
 
-        // 집 반경 필터
-        if (radiusKm > 0 && !isNaN(homeX) && !isNaN(homeY)) {
-            top10 = top10.filter(f => {
-                const lat = f.properties.center_lat;
-                const lon = f.properties.center_lon;
-                const d = distanceMeters(homeY, homeX, lat, lon);
-                return d <= radiusKm * 1000;
-            });
+        if (top10.length === 0) {
+            alert("조건에 맞는 상권이 없습니다. 인디케이터를 다시 선택해 주세요.");
+            top10Layer.clearLayers();
+            topPointsLayer.clearLayers();
+            homeLayer.clearLayers();
+            return;
         }
 
-        drawTop10(top10, homeX, homeY, radiusKm);
+        const homeXVal = document.getElementById("homeX").value;
+        const homeYVal = document.getElementById("homeY").value;
+        const radiusVal = document.getElementById("radius").value;
+
+        const homeX = parseFloat(homeXVal);
+        const homeY = parseFloat(homeYVal);
+        const radiusKm = parseFloat(radiusVal);
+
+        console.log("🏠 homeX, homeY, radiusKm =", homeX, homeY, radiusKm);
+
+        let useHomeFilter = false;
+        if (!isNaN(radiusKm) && radiusKm > 0 && homeXVal !== "" && homeYVal !== "") {
+            if (!isNaN(homeX) && !isNaN(homeY)) {
+                useHomeFilter = true;
+            }
+        }
+
+        if (useHomeFilter) {
+            top10 = top10
+                .map(f => {
+                    const lat = Number(f.properties.center_lat);
+                    const lon = Number(f.properties.center_lon);
+                    const d = distanceMeters(homeY, homeX, lat, lon);
+                    return { feature: f, dist: d };
+                })
+                .filter(obj => !isNaN(obj.dist) && obj.dist <= radiusKm * 1000)
+                .sort((a, b) => a.dist - b.dist)
+                .map(obj => obj.feature);
+
+            if (top10.length === 0) {
+                alert("선택한 반경 안에 추천 상권이 없습니다.");
+            }
+        }
+
+        if (top10.length > 10) {
+            top10 = top10.slice(0, 10);
+        }
+
+        drawTop10(
+            top10,
+            useHomeFilter ? homeX : NaN,
+            useHomeFilter ? homeY : NaN,
+            useHomeFilter ? radiusKm : 0
+        );
     });
 }
 
