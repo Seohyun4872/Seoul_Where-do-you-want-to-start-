@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8" />
+    <title>상권 추천 지도</title>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+
+    <style>
+        body { margin: 0; padding: 0; }
+        #controls {
+            padding: 12px;
+            background: #f7f7f7;
+            border-bottom: 1px solid #ddd;
+        }
+        #map {
+            width: 100%;
+            height: calc(100vh - 110px);
+        }
+        select, input {
+            margin-right: 10px;
+            padding: 5px;
+        }
+    </style>
+
+</head>
+<body>
+
+    <!-- =======================
+         인디케이터 UI 영역
+    =========================== -->
+    <div id="controls">
+        <label>업종:</label>
+        <select id="industry"></select>
+
+        <label>피크시간대:</label>
+        <select id="time"></select>
+
+        <label>주중/주말:</label>
+        <select id="weekday"></select>
+
+        <label>가격대:</label>
+        <select id="price"></select>
+
+        <br><br>
+
+        <label>집 X(경도):</label>
+        <input type="number" id="homeX" step="0.0001" />
+
+        <label>집 Y(위도):</label>
+        <input type="number" id="homeY" step="0.0001" />
+
+        <label>반경(km):</label>
+        <select id="radius">
+            <option value="0">선택 안 함</option>
+            <option value="3">3km</option>
+            <option value="5">5km</option>
+            <option value="10">10km</option>
+        </select>
+
+        <button id="runBtn">상권 추천</button>
+    </div>
+
+    <!-- 지도 -->
+    <div id="map"></div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+    <!-- app.js -->
+    <script src="app.js"></script>
+
+</body>
+</html>
