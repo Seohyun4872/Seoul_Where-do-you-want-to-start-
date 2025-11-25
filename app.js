@@ -121,7 +121,7 @@ function filterAreasForTop10(widgets) {
     const selectedIndustry = widgets.industry;
     const allowedClusters = CONFIG.industry_cluster_map[selectedIndustry] || [];
 
-    let df = [...AREAS];
+    let df = [...(baseFeatures || AREAS)];
 
     // 1) 업종 → 클러스터 필터
     df = df.filter(f => allowedClusters.includes(f.properties.cluster));
@@ -339,7 +339,8 @@ async function init() {
     const timeSel = document.getElementById("time");
     const weekdaySel = document.getElementById("weekday");
     const priceSel = document.getElementById("price");
-
+    const proximitySel = document.getElementById("proximity");
+    
     Object.keys(CONFIG.industry_cluster_map).forEach(k => {
         const op = document.createElement("option");
         op.value = k;
@@ -378,71 +379,101 @@ async function init() {
 
     L.control.layers(null, overlayMaps, { collapsed: false }).addTo(map);
 
-    // 6) 버튼 클릭 이벤트 (조금 더 견고하게)
-    document.getElementById("runBtn").addEventListener("click", () => {
+    // 6) 버튼 클릭 이벤트 
+document.getElementById("runBtn").addEventListener("click", () => {
 
-        const widgets = {
-            industry: industrySel.value,
-            time: timeSel.value,
-            weekday: weekdaySel.value,
-            price: priceSel.value,
-        };
+    const widgets = {
+        industry: industrySel.value,
+        time: timeSel.value,
+        weekday: weekdaySel.value,
+        price: priceSel.value,
+    };
 
-        let top10 = filterAreasForTop10(widgets);
+    const homeXVal = document.getElementById("homeX").value;
+    const homeYVal = document.getElementById("homeY").value;
+    const radiusVal = document.getElementById("radius").value;
+    const proximityMode = proximitySel.value;   // "any" / "near" / "far"
 
-        if (top10.length === 0) {
-            alert("조건에 맞는 상권이 없습니다. 인디케이터를 다시 선택해 주세요.");
-            top10Layer.clearLayers();
-            topPointsLayer.clearLayers();
-            homeLayer.clearLayers();
+    const homeX = parseFloat(homeXVal);
+    const homeY = parseFloat(homeYVal);
+    const radiusKm = parseFloat(radiusVal);
+
+    console.log("🏠 homeX, homeY, radiusKm, mode =", homeX, homeY, radiusKm, proximityMode);
+
+    // 1) 거리 기반으로 먼저 상권 후보 필터링
+    let baseFeatures = [...AREAS];
+    let useHome = false;
+
+    // (1) 직주근접 상관없음 → 집/반경 정보 안 씀
+    if (proximityMode === "any") {
+        useHome = false;
+    } else {
+        // (2) near / far 인데 집 좌표 or 반경이 이상하면 에러
+        if (
+            homeXVal === "" || homeYVal === "" ||
+            isNaN(homeX) || isNaN(homeY) ||
+            isNaN(radiusKm) || radiusKm <= 0
+        ) {
+            alert("직주근접/분리를 사용하려면 집 X,Y 좌표와 반경(km)을 올바르게 입력해 주세요.");
             return;
         }
 
-        const homeXVal = document.getElementById("homeX").value;
-        const homeYVal = document.getElementById("homeY").value;
-        const radiusVal = document.getElementById("radius").value;
+        useHome = true;
+        const radiusM = radiusKm * 1000;
 
-        const homeX = parseFloat(homeXVal);
-        const homeY = parseFloat(homeYVal);
-        const radiusKm = parseFloat(radiusVal);
+        baseFeatures = baseFeatures
+            .map(f => {
+                const lat = Number(f.properties.center_lat);
+                const lon = Number(f.properties.center_lon);
+                const d = distanceMeters(homeY, homeX, lat, lon);
+                return { feature: f, dist: d };
+            })
+            .filter(obj => !isNaN(obj.dist))
+            .filter(obj => {
+                if (proximityMode === "near") {
+                    // 반경 이내 = 직주근접
+                    return obj.dist <= radiusM;
+                } else {
+                    // 반경 밖 = 직주분리
+                    return obj.dist > radiusM;
+                }
+            })
+            .map(obj => obj.feature);
 
-        console.log("🏠 homeX, homeY, radiusKm =", homeX, homeY, radiusKm);
-
-        let useHomeFilter = false;
-        if (!isNaN(radiusKm) && radiusKm > 0 && homeXVal !== "" && homeYVal !== "") {
-            if (!isNaN(homeX) && !isNaN(homeY)) {
-                useHomeFilter = true;
+        if (baseFeatures.length === 0) {
+            if (proximityMode === "near") {
+                alert(`집 기준 반경 ${radiusKm}km 이내(근접)에 존재하는 상권이 없습니다.\n반경을 키우거나 조건을 완화해 보세요.`);
+            } else {
+                alert(`집 기준 반경 ${radiusKm}km 밖(비근접)에 존재하는 상권이 없습니다.\n반경을 줄이거나 조건을 완화해 보세요.`);
             }
+            // 그래도 집 위치 + 링만 보여주고 종료
+            drawTop10([], homeX, homeY, radiusKm);
+            return;
         }
+    }
 
-        if (useHomeFilter) {
-            top10 = top10
-                .map(f => {
-                    const lat = Number(f.properties.center_lat);
-                    const lon = Number(f.properties.center_lon);
-                    const d = distanceMeters(homeY, homeX, lat, lon);
-                    return { feature: f, dist: d };
-                })
-                .filter(obj => !isNaN(obj.dist) && obj.dist <= radiusKm * 1000)
-                .sort((a, b) => a.dist - b.dist)
-                .map(obj => obj.feature);
+    // 2) 인디케이터 조건에 맞게 Top10 뽑기 (baseFeatures 내에서만)
+    let top10 = filterAreasForTop10(widgets, baseFeatures);
 
-            if (top10.length === 0) {
-                alert("선택한 반경 안에 추천 상권이 없습니다.");
-            }
-        }
+    if (top10.length === 0) {
+        alert("선택한 조건에 해당하는 상권이 없습니다.\n인디케이터를 조금 완화해서 다시 설정해 주세요.");
+        top10Layer.clearLayers();
+        topPointsLayer.clearLayers();
+        homeLayer.clearLayers();
+        renderTop10List([]);
+        return;
+    }
 
-        if (top10.length > 10) {
-            top10 = top10.slice(0, 10);
-        }
+    if (top10.length > 10) {
+        top10 = top10.slice(0, 10);
+    }
 
-        drawTop10(
-            top10,
-            useHomeFilter ? homeX : NaN,
-            useHomeFilter ? homeY : NaN,
-            useHomeFilter ? radiusKm : 0
-        );
-    });
-}
-
+    // 3) 지도 & 리스트 갱신
+    drawTop10(
+        top10,
+        useHome ? homeX : NaN,
+        useHome ? homeY : NaN,
+        useHome ? radiusKm : 0
+    );
+});
 init();
