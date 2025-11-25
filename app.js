@@ -22,7 +22,7 @@ function distanceMeters(lat1, lon1, lat2, lon2) {
     const R = 6371000;
     const toRad = d => d * Math.PI / 180;
     const dLat = toRad(lat2 - lat1);
-    const dLon = toRad(lat2 - lon1);
+    const dLon = toRad(lon2 - lon1);
     const a =
         Math.sin(dLat/2)**2 +
         Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
@@ -32,7 +32,7 @@ function distanceMeters(lat1, lon1, lat2, lon2) {
 }
 
 // ============================
-// 스타일 함수들 (folium 대응)
+// 스타일 함수들
 // ============================
 
 // 1) rank에 따라 상권 색상
@@ -114,13 +114,52 @@ function makePopupHtml(props, rank) {
 }
 
 // ============================
+// Top10 리스트 텍스트 패널 렌더링
+// ============================
+function renderTop10List(top10) {
+    const container = document.getElementById("top10List");
+    if (!container) return;
+
+    container.innerHTML = "";
+
+    if (!top10 || top10.length === 0) {
+        container.innerHTML = "<p>추천 상권이 없습니다.</p>";
+        return;
+    }
+
+    top10
+        .sort((a, b) => a.properties.rank - b.properties.rank)
+        .forEach(f => {
+            const p = f.properties;
+            const sales = Number(p["점포당_매출_num"]);
+            const formattedSales = isNaN(sales)
+                ? "정보 없음"
+                : sales.toLocaleString() + " 원";
+
+            const div = document.createElement("div");
+            div.className = "top-item";
+
+            div.innerHTML = `
+                <strong>${p.rank}위 | ${p["상권_코드_명"]}</strong><br>
+                피크시간대: ${p["피크_시간대_유형"]}<br>
+                주중/주말: ${p["주중주말_유형"]}<br>
+                가격대: ${p["가격대_유형"]}<br>
+                점포당 매출: ${formattedSales}
+            `;
+
+            container.appendChild(div);
+        });
+}
+
+// ============================
 // 인디케이터 필터링 → Top10
 // ============================
-function filterAreasForTop10(widgets) {
+function filterAreasForTop10(widgets, baseFeatures = null) {
 
     const selectedIndustry = widgets.industry;
     const allowedClusters = CONFIG.industry_cluster_map[selectedIndustry] || [];
 
+    // 기본은 전체 상권(AREAS)이지만, baseFeatures가 들어오면 그 안에서만 필터링
     let df = [...(baseFeatures || AREAS)];
 
     // 1) 업종 → 클러스터 필터
@@ -178,7 +217,7 @@ function drawTop10(top10, homeX, homeY, radiusKm) {
     }
 
     homeLayer.addTo(map);
-    
+
     // 2) Top10 상권 폴리곤
     const top10Sorted = [...top10].sort((a, b) => a.properties.rank - b.properties.rank);
 
@@ -189,11 +228,9 @@ function drawTop10(top10, homeX, homeY, radiusKm) {
         const layer = L.geoJSON(f, {
             style: areaStyleFn,
             onEachFeature: (feature, lyr) => {
-                // 팝업
-                lyr.bindPopup(popupHtml, { maxWidth: 400 });
-                // 툴팁 (순위 + 상권명)
                 const tt = `순위 ${rank} | ${feature.properties["상권_코드_명"]}`;
                 lyr.bindTooltip(tt, { sticky: true });
+                lyr.bindPopup(popupHtml, { maxWidth: 400 });
             }
         });
 
@@ -202,44 +239,9 @@ function drawTop10(top10, homeX, homeY, radiusKm) {
 
     top10Layer.addTo(map);
 
-function renderTop10List(top10) {
-    const container = document.getElementById("top10List");
-    container.innerHTML = "";
-
-    if (!top10 || top10.length === 0) {
-        container.innerHTML = "<p>추천 상권이 없습니다.</p>";
-        return;
-    }
-
-    top10
-        .sort((a, b) => a.properties.rank - b.properties.rank)
-        .forEach(f => {
-            const p = f.properties;
-
-            const sales = Number(p["점포당_매출_num"]);
-            const formattedSales = isNaN(sales)
-                ? "정보 없음"
-                : sales.toLocaleString() + " 원";
-
-            const div = document.createElement("div");
-            div.className = "top-item";
-
-            div.innerHTML = `
-                <strong>${p.rank}위 | ${p["상권_코드_명"]}</strong><br>
-                피크시간대: ${p["피크_시간대_유형"]}<br>
-                주중/주말: ${p["주중주말_유형"]}<br>
-                가격대: ${p["가격대_유형"]}<br>
-                점포당 매출: ${formattedSales}
-            `;
-
-            container.appendChild(div);
-        });
-}
-
-
     // 3) TOP1-3 포인터 (별 마커)
     const starIcon = L.divIcon({
-        html: "🎯",
+        html: "⭐",
         className: "top-star-icon",
         iconSize: [24, 24],
         iconAnchor: [12, 12]
@@ -262,14 +264,17 @@ function renderTop10List(top10) {
     });
 
     topPointsLayer.addTo(map);
+
+    // 4) 왼쪽 리스트 패널도 같이 업데이트
+    renderTop10List(top10);
 }
 
 // ============================
-// 메인 init (⚠ 수정된 버전)
+// 메인 init
 // ============================
 async function init() {
 
-    // 1) 지도 생성 (folium의 CartoDB positron 느낌)
+    // 1) 지도 생성
     map = L.map("map").setView([37.5665, 126.9780], 11);
 
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
@@ -303,7 +308,7 @@ async function init() {
     CONFIG = configData;
     PREDICTED_MAP = predData;
 
-    // 3) 격자 / 경계는 있으면 쓰고, 없으면 경고만 띄우기
+    // 3) 격자 / 경계는 있으면 쓰고, 없으면 경고만 찍고 넘어가기
     try {
         const gridRes = await fetch("./data/grid_250m_4326.geojson");
         if (gridRes.ok) {
@@ -340,7 +345,7 @@ async function init() {
     const weekdaySel = document.getElementById("weekday");
     const priceSel = document.getElementById("price");
     const proximitySel = document.getElementById("proximity");
-    
+
     Object.keys(CONFIG.industry_cluster_map).forEach(k => {
         const op = document.createElement("option");
         op.value = k;
@@ -369,7 +374,7 @@ async function init() {
         priceSel.appendChild(op);
     });
 
-    // 5) LayerControl (grid/boundary 없는 경우도 대비)
+    // 5) LayerControl
     const overlayMaps = {};
     if (gridLayer) overlayMaps["Grid (격자)"] = gridLayer;
     if (boundaryLayer) overlayMaps["서울 외곽 경계"] = boundaryLayer;
@@ -379,101 +384,103 @@ async function init() {
 
     L.control.layers(null, overlayMaps, { collapsed: false }).addTo(map);
 
-    // 6) 버튼 클릭 이벤트 
-document.getElementById("runBtn").addEventListener("click", () => {
+    // 6) 버튼 클릭 이벤트 (직주근접 모드 반영)
+    document.getElementById("runBtn").addEventListener("click", () => {
 
-    const widgets = {
-        industry: industrySel.value,
-        time: timeSel.value,
-        weekday: weekdaySel.value,
-        price: priceSel.value,
-    };
+        const widgets = {
+            industry: industrySel.value,
+            time: timeSel.value,
+            weekday: weekdaySel.value,
+            price: priceSel.value,
+        };
 
-    const homeXVal = document.getElementById("homeX").value;
-    const homeYVal = document.getElementById("homeY").value;
-    const radiusVal = document.getElementById("radius").value;
-    const proximityMode = proximitySel.value;   // "any" / "near" / "far"
+        const homeXVal = document.getElementById("homeX").value;
+        const homeYVal = document.getElementById("homeY").value;
+        const radiusVal = document.getElementById("radius").value;
+        const proximityMode = proximitySel.value;   // "any" / "near" / "far"
 
-    const homeX = parseFloat(homeXVal);
-    const homeY = parseFloat(homeYVal);
-    const radiusKm = parseFloat(radiusVal);
+        const homeX = parseFloat(homeXVal);
+        const homeY = parseFloat(homeYVal);
+        const radiusKm = parseFloat(radiusVal);
 
-    console.log("🏠 homeX, homeY, radiusKm, mode =", homeX, homeY, radiusKm, proximityMode);
+        console.log("🏠 homeX, homeY, radiusKm, mode =", homeX, homeY, radiusKm, proximityMode);
 
-    // 1) 거리 기반으로 먼저 상권 후보 필터링
-    let baseFeatures = [...AREAS];
-    let useHome = false;
+        // 1) 거리 기반으로 먼저 상권 후보 필터링
+        let baseFeatures = [...AREAS];
+        let useHome = false;
 
-    // (1) 직주근접 상관없음 → 집/반경 정보 안 씀
-    if (proximityMode === "any") {
-        useHome = false;
-    } else {
-        // (2) near / far 인데 집 좌표 or 반경이 이상하면 에러
-        if (
-            homeXVal === "" || homeYVal === "" ||
-            isNaN(homeX) || isNaN(homeY) ||
-            isNaN(radiusKm) || radiusKm <= 0
-        ) {
-            alert("직주근접/분리를 사용하려면 집 X,Y 좌표와 반경(km)을 올바르게 입력해 주세요.");
-            return;
-        }
-
-        useHome = true;
-        const radiusM = radiusKm * 1000;
-
-        baseFeatures = baseFeatures
-            .map(f => {
-                const lat = Number(f.properties.center_lat);
-                const lon = Number(f.properties.center_lon);
-                const d = distanceMeters(homeY, homeX, lat, lon);
-                return { feature: f, dist: d };
-            })
-            .filter(obj => !isNaN(obj.dist))
-            .filter(obj => {
-                if (proximityMode === "near") {
-                    // 반경 이내 = 직주근접
-                    return obj.dist <= radiusM;
-                } else {
-                    // 반경 밖 = 직주분리
-                    return obj.dist > radiusM;
-                }
-            })
-            .map(obj => obj.feature);
-
-        if (baseFeatures.length === 0) {
-            if (proximityMode === "near") {
-                alert(`집 기준 반경 ${radiusKm}km 이내(근접)에 존재하는 상권이 없습니다.\n반경을 키우거나 조건을 완화해 보세요.`);
-            } else {
-                alert(`집 기준 반경 ${radiusKm}km 밖(비근접)에 존재하는 상권이 없습니다.\n반경을 줄이거나 조건을 완화해 보세요.`);
+        // (1) 직주근접 상관없음 → 집/반경 정보 안 씀
+        if (proximityMode === "any") {
+            useHome = false;
+        } else {
+            // (2) near / far 인데 집 좌표 or 반경이 이상하면 에러
+            if (
+                homeXVal === "" || homeYVal === "" ||
+                isNaN(homeX) || isNaN(homeY) ||
+                isNaN(radiusKm) || radiusKm <= 0
+            ) {
+                alert("직주근접/분리를 사용하려면 집 X,Y 좌표와 반경(km)을 올바르게 입력해 주세요.");
+                return;
             }
-            // 그래도 집 위치 + 링만 보여주고 종료
-            drawTop10([], homeX, homeY, radiusKm);
+
+            useHome = true;
+            const radiusM = radiusKm * 1000;
+
+            baseFeatures = baseFeatures
+                .map(f => {
+                    const lat = Number(f.properties.center_lat);
+                    const lon = Number(f.properties.center_lon);
+                    const d = distanceMeters(homeY, homeX, lat, lon);
+                    return { feature: f, dist: d };
+                })
+                .filter(obj => !isNaN(obj.dist))
+                .filter(obj => {
+                    if (proximityMode === "near") {
+                        // 반경 이내 = 직주근접
+                        return obj.dist <= radiusM;
+                    } else {
+                        // 반경 밖 = 직주분리
+                        return obj.dist > radiusM;
+                    }
+                })
+                .map(obj => obj.feature);
+
+            if (baseFeatures.length === 0) {
+                if (proximityMode === "near") {
+                    alert(`집 기준 반경 ${radiusKm}km 이내(근접)에 존재하는 상권이 없습니다.\n반경을 키우거나 조건을 완화해 보세요.`);
+                } else {
+                    alert(`집 기준 반경 ${radiusKm}km 밖(비근접)에 존재하는 상권이 없습니다.\n반경을 줄이거나 조건을 완화해 보세요.`);
+                }
+                // 그래도 집 위치 + 링만 보여주고 종료
+                drawTop10([], homeX, homeY, radiusKm);
+                return;
+            }
+        }
+
+        // 2) 인디케이터 조건에 맞게 Top10 뽑기 (baseFeatures 내에서만)
+        let top10 = filterAreasForTop10(widgets, baseFeatures);
+
+        if (top10.length === 0) {
+            alert("선택한 조건에 해당하는 상권이 없습니다.\n인디케이터를 조금 완화해서 다시 설정해 주세요.");
+            top10Layer.clearLayers();
+            topPointsLayer.clearLayers();
+            homeLayer.clearLayers();
+            renderTop10List([]);
             return;
         }
-    }
 
-    // 2) 인디케이터 조건에 맞게 Top10 뽑기 (baseFeatures 내에서만)
-    let top10 = filterAreasForTop10(widgets, baseFeatures);
+        if (top10.length > 10) {
+            top10 = top10.slice(0, 10);
+        }
 
-    if (top10.length === 0) {
-        alert("선택한 조건에 해당하는 상권이 없습니다.\n인디케이터를 조금 완화해서 다시 설정해 주세요.");
-        top10Layer.clearLayers();
-        topPointsLayer.clearLayers();
-        homeLayer.clearLayers();
-        renderTop10List([]);
-        return;
-    }
+        // 3) 지도 & 리스트 갱신
+        drawTop10(
+            top10,
+            useHome ? homeX : NaN,
+            useHome ? homeY : NaN,
+            useHome ? radiusKm : 0
+        );
+    });
+}
 
-    if (top10.length > 10) {
-        top10 = top10.slice(0, 10);
-    }
-
-    // 3) 지도 & 리스트 갱신
-    drawTop10(
-        top10,
-        useHome ? homeX : NaN,
-        useHome ? homeY : NaN,
-        useHome ? radiusKm : 0
-    );
-});
 init();
