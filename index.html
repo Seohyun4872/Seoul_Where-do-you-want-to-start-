@@ -40,7 +40,7 @@
         #map-container {
             position: relative;
             width: 100%;
-            height: calc(100vh - 110px); /* 위에 controls 높이만큼 뺌 */
+            height: calc(100vh - 110px); /* 위에 controls 높이만 뺌 */
         }
 
         #map {
@@ -53,7 +53,7 @@
             position: absolute;
             top: 20px;
             left: 20px;
-            width: 280px;
+            width: 300px;
             max-height: calc(100% - 40px);
             background: #ffffff;
             border-radius: 10px;
@@ -110,6 +110,22 @@
         .top-marker.rank-1 { background: #d81b60; } /* 진한 핑크 */
         .top-marker.rank-2 { background: #f9a825; } /* 노랑 */
         .top-marker.rank-3 { background: #43a047; } /* 초록 */
+
+        /* 업종 설명 박스 */
+        #industrySentenceBox {
+            margin-bottom: 10px;
+            padding: 8px 10px;
+            background: #f9fafb;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+            font-size: 13px;
+        }
+
+        #industrySentenceBox strong {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 13px;
+        }
     </style>
 
 </head>
@@ -165,6 +181,13 @@
         <!-- Top10 리스트 패널 -->
         <div id="sidebar">
             <h2>📊 상권 Top10 리스트</h2>
+
+            <!-- 👇 업종별 설명 박스 -->
+            <div id="industrySentenceBox">
+                <strong>업종별 중요 포인트 설명</strong>
+                <p id="industrySentence">업종을 선택하고 “상권 추천” 버튼을 누르면 설명이 표시됩니다.</p>
+            </div>
+
             <div id="top10List">
                 <p>상단 인디케이터를 선택하고<br>“상권 추천” 버튼을 눌러주세요.</p>
             </div>
@@ -182,4 +205,5 @@
 
 </body>
 </html>
+
 
