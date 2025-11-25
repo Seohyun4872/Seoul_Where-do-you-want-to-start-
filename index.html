@@ -1,150 +1,123 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8" />
-    <title>상권 추천 지도</title>
+  <meta charset="UTF-8" />
+  <title>서울 상권 추천 지도</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
 
-    <style>
-        body { margin: 0; padding: 0; }
-
-        #controls {
-            padding: 12px;
-            background: #f7f7f7;
-            border-bottom: 1px solid #ddd;
-        }
-
-        /* 지도와 사이드바를 함께 담는 컨테이너 */
-        #map-container {
-            position: relative;
-            width: 100%;
-            height: calc(100vh - 110px); /* 위에 controls 높이만큼 뺌 */
-        }
-
-        #map {
-            width: 100%;
-            height: 100%;
-        }
-
-        select, input {
-            margin-right: 10px;
-            padding: 5px;
-        }
-
-        /* ====== Top10 리스트 사이드바 ====== */
-        #sidebar {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            width: 280px;
-            max-height: calc(100% - 40px);
-            background: #ffffff;
-            border-radius: 10px;
-            padding: 15px;
-            overflow-y: auto;
-            box-shadow: 0 0 10px rgba(0,0,0,0.25);
-            z-index: 9999;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-            font-size: 14px;
-        }
-
-        #sidebar h2 {
-            margin-top: 0;
-            margin-bottom: 10px;
-            font-size: 16px;
-        }
-
-        #top10List {
-            margin-top: 10px;
-            font-size: 13px;
-            line-height: 1.4;
-        }
-
-        .top-item {
-            padding: 8px 0;
-            border-bottom: 1px solid #eee;
-        }
-
-        .top-item:last-child {
-            border-bottom: none;
-        }
-
-        .top-item strong {
-            font-size: 14px;
-        }
-
-        .top-item small {
-            color: #666;
-        }
-    </style>
-
+  <style>
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    #app {
+      display: flex;
+      height: 100vh;
+    }
+    #controls {
+      width: 340px;
+      padding: 16px;
+      box-sizing: border-box;
+      border-right: 1px solid #ddd;
+      overflow-y: auto;
+      font-size: 14px;
+    }
+    #map {
+      flex: 1;
+      height: 100vh;
+    }
+    label {
+      display: block;
+      margin-bottom: 8px;
+    }
+    select, input {
+      width: 100%;
+      padding: 4px 6px;
+      margin-top: 4px;
+      margin-bottom: 8px;
+      box-sizing: border-box;
+    }
+    button {
+      width: 100%;
+      padding: 8px 12px;
+      margin-top: 8px;
+      cursor: pointer;
+    }
+    #result {
+      margin-top: 16px;
+      font-size: 13px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+      font-size: 12px;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 4px;
+      text-align: left;
+    }
+    th {
+      background: #f5f5f5;
+    }
+  </style>
 </head>
 <body>
-
-    <!-- =======================
-         인디케이터 UI 영역
-    =========================== -->
+  <div id="app">
     <div id="controls">
-        <label>업종:</label>
-        <select id="industry"></select>
+      <h3>🎯 인디케이터 설정</h3>
 
-        <label>피크시간대:</label>
-        <select id="time"></select>
-
-        <label>주중/주말:</label>
-        <select id="weekday"></select>
-
-        <label>가격대:</label>
-        <select id="price"></select>
-
-        <br><br>
-
-        <label>집 X(경도):</label>
-        <input type="number" id="homeX" step="0.0001" />
-
-        <label>집 Y(위도):</label>
-        <input type="number" id="homeY" step="0.0001" />
-        
-        <label>직주근접:</label>
-        <select id="proximity">
-        <option value="any">상관없음</option>
-        <option value="near">직주근접</option>
-        <option value="far">직주분리</option>
+      <label>
+        업종
+        <select id="industrySelect">
+          <option value="ALL">전체</option>
         </select>
+      </label>
 
-        <label>반경(km):</label>
-        <select id="radius">
-            <option value="0">선택 안 함</option>
-            <option value="3">3km</option>
-            <option value="5">5km</option>
-            <option value="10">10km</option>
+      <label>
+        피크 시간대
+        <select id="timeSelect">
+          <option value="ALL">전체</option>
         </select>
+      </label>
 
-        <button id="runBtn">상권 추천</button>
+      <label>
+        주중/주말
+        <select id="weekdaySelect">
+          <option value="ALL">전체</option>
+        </select>
+      </label>
+
+      <label>
+        가격대
+        <select id="priceSelect">
+          <option value="ALL">전체</option>
+        </select>
+      </label>
+
+      <hr />
+
+      <!-- 나중에 집 좌표/반경도 다시 붙이고 싶으면 여기 아래에 추가하면 돼 -->
+
+      <button id="runBtn">나에게 맞는 상권 추천</button>
+
+      <div id="result"></div>
     </div>
 
-    <!-- 지도 + 사이드바 -->
-    <div id="map-container">
-        <!-- Top10 리스트 패널 -->
-        <div id="sidebar">
-            <h2>📊 상권 Top10 리스트</h2>
-            <div id="top10List">
-                <p>상단 인디케이터를 선택하고<br>“상권 추천” 버튼을 눌러주세요.</p>
-            </div>
-        </div>
+    <!-- ❗ 이게 바로 지도가 올라갈 자리 -->
+    <div id="map"></div>
+  </div>
 
-        <!-- 지도 -->
-        <div id="map"></div>
-    </div>
-
-    <!-- Leaflet JS -->
-    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-
-    <!-- app.js -->
-    <script src="app.js"></script>
-
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- 너의 JS 로직 -->
+  <script src="app.js"></script>
 </body>
 </html>
-
