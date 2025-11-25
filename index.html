@@ -1,192 +1,184 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8" />
-  <title>서울 상권 추천 지도</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta charset="UTF-8" />
+    <title>상권 추천 지도</title>
 
-  <!-- Leaflet CSS -->
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-  />
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
 
-  <style>
-    body {
-      margin: 0;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-    #app {
-      display: flex;
-      height: 100vh;
-    }
-    #controls {
-      width: 360px;
-      padding: 16px;
-      box-sizing: border-box;
-      border-right: 1px solid #ddd;
-      overflow-y: auto;
-      font-size: 14px;
-      background: #fafafa;
-    }
-    #map {
-      flex: 1;
-      height: 100vh;
-    }
-    h3, h4 {
-      margin-top: 0;
-    }
-    label {
-      display: block;
-      margin-bottom: 8px;
-    }
-    select,
-    input {
-      width: 100%;
-      padding: 4px 6px;
-      margin-top: 4px;
-      margin-bottom: 8px;
-      box-sizing: border-box;
-      font-size: 13px;
-    }
-    button {
-      width: 100%;
-      padding: 8px 12px;
-      margin-top: 8px;
-      cursor: pointer;
-      font-size: 14px;
-      border-radius: 4px;
-      border: 1px solid #007bff;
-      background: #007bff;
-      color: #fff;
-    }
-    button:hover {
-      background: #0056c7;
-    }
-    #result {
-      margin-top: 16px;
-      font-size: 13px;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 8px;
-      font-size: 12px;
-      background: #fff;
-    }
-    th, td {
-      border: 1px solid #ddd;
-      padding: 4px;
-      text-align: left;
-    }
-    th {
-      background: #f5f5f5;
-    }
+    <style>
+        body { margin: 0; padding: 0; }
 
-    /* Leaflet divIcon용 기본 설정 */
-    .leaflet-div-icon {
-      background: transparent;
-      border: none;
-    }
+        /* 상단 인디케이터/집 정보 컨트롤 영역 */
+        #controls {
+            padding: 12px;
+            background: #f7f7f7;
+            border-bottom: 1px solid #ddd;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+            font-size: 14px;
+        }
 
-    /* Top 3 마커 동그란 아이콘 */
-    .top-marker-inner {
-      width: 26px;
-      height: 26px;
-      border-radius: 50%;
-      background: #ffcc00;
-      border: 2px solid #ff6600;
-      color: #000;
-      font-weight: bold;
-      font-size: 13px;
-      line-height: 22px;
-      text-align: center;
-      box-shadow: 0 0 5px rgba(0, 0, 0, 0.4);
-    }
-  </style>
+        #controls label {
+            margin-right: 4px;
+        }
+
+        #controls select,
+        #controls input {
+            margin-right: 10px;
+            padding: 4px 6px;
+            font-size: 13px;
+        }
+
+        #controls button {
+            padding: 5px 10px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        /* 지도와 사이드바를 함께 담는 컨테이너 */
+        #map-container {
+            position: relative;
+            width: 100%;
+            height: calc(100vh - 110px); /* 위에 controls 높이만큼 뺌 */
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* ====== Top10 리스트 사이드바 ====== */
+        #sidebar {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 280px;
+            max-height: calc(100% - 40px);
+            background: #ffffff;
+            border-radius: 10px;
+            padding: 15px;
+            overflow-y: auto;
+            box-shadow: 0 0 10px rgba(0,0,0,0.25);
+            z-index: 9999;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+            font-size: 14px;
+        }
+
+        #sidebar h2 {
+            margin-top: 0;
+            margin-bottom: 8px;
+            font-size: 16px;
+        }
+
+        #top10List {
+            margin-top: 6px;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+
+        .top-item {
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .top-item:last-child {
+            border-bottom: none;
+        }
+
+        .top-item strong {
+            font-size: 14px;
+        }
+
+        .top-item small {
+            color: #666;
+        }
+
+        /* TOP1-3 컬러 뱃지 마커 스타일 */
+        .top-marker {
+            background: #ff4d4f;
+            color: #fff;
+            border-radius: 999px;
+            padding: 2px 8px;
+            font-size: 12px;
+            font-weight: 700;
+            border: 2px solid #fff;
+            box-shadow: 0 0 6px rgba(0,0,0,0.5);
+            white-space: nowrap;
+        }
+
+        .top-marker.rank-1 { background: #d81b60; } /* 진한 핑크 */
+        .top-marker.rank-2 { background: #f9a825; } /* 노랑 */
+        .top-marker.rank-3 { background: #43a047; } /* 초록 */
+    </style>
+
 </head>
 <body>
-  <div id="app">
-    <!-- 왼쪽: 인디케이터 + 직주근접 설정 -->
+
+    <!-- =======================
+         인디케이터 / 집 정보 UI 영역
+    =========================== -->
     <div id="controls">
-      <h3>🎯 인디케이터 설정</h3>
+        <!-- 1) 인디케이터 필터 -->
+        <label>업종:</label>
+        <select id="industry"></select>
 
-      <label>
-        업종
-        <select id="industrySelect">
-          <option value="ALL">전체</option>
+        <label>피크시간대:</label>
+        <select id="time"></select>
+
+        <label>주중/주말:</label>
+        <select id="weekday"></select>
+
+        <label>가격대:</label>
+        <select id="price"></select>
+
+        <br><br>
+
+        <!-- 2) 집 좌표 + 직주근접 + 반경 -->
+        <label>집 X(경도):</label>
+        <input type="number" id="homeX" step="0.0001" placeholder="예: 126.97" />
+
+        <label>집 Y(위도):</label>
+        <input type="number" id="homeY" step="0.0001" placeholder="예: 37.56" />
+
+        <label>직주근접:</label>
+        <select id="proximity">
+            <option value="any">상관없음</option>
+            <option value="near">직주근접</option>
+            <option value="far">직주분리</option>
         </select>
-      </label>
 
-      <label>
-        피크 시간대
-        <select id="timeSelect">
-          <option value="ALL">전체</option>
+        <label>반경(km):</label>
+        <select id="radius">
+            <option value="3">3km</option>
+            <option value="5" selected>5km</option>
+            <option value="10">10km</option>
         </select>
-      </label>
 
-      <label>
-        주중/주말
-        <select id="weekdaySelect">
-          <option value="ALL">전체</option>
-        </select>
-      </label>
-
-      <label>
-        가격대
-        <select id="priceSelect">
-          <option value="ALL">전체</option>
-        </select>
-      </label>
-
-      <hr />
-
-      <h4>🏠 내 집 기준 반경 필터 (선택)</h4>
-
-      <label>
-        집 X(경도)
-        <input
-          id="homeX"
-          type="number"
-          step="0.000001"
-          placeholder="예: 127.0"
-        />
-      </label>
-
-      <label>
-        집 Y(위도)
-        <input
-          id="homeY"
-          type="number"
-          step="0.000001"
-          placeholder="예: 37.5"
-        />
-      </label>
-
-      <label>
-        반경
-        <select id="radiusSelect">
-          <option value="2">2 km</option>
-          <option value="5" selected>5 km</option>
-          <option value="10">10 km</option>
-          <option value="15">15 km</option>
-        </select>
-      </label>
-
-      <button id="runBtn">나에게 맞는 상권 추천</button>
-
-      <div id="result"></div>
+        <button id="runBtn">상권 추천</button>
     </div>
 
-    <!-- 오른쪽: 지도 영역 -->
-    <div id="map"></div>
-  </div>
+    <!-- =======================
+         지도 + Top10 리스트 패널
+    =========================== -->
+    <div id="map-container">
+        <!-- Top10 리스트 패널 -->
+        <div id="sidebar">
+            <h2>📊 상권 Top10 리스트</h2>
+            <div id="top10List">
+                <p>상단 인디케이터를 선택하고<br>“상권 추천” 버튼을 눌러주세요.</p>
+            </div>
+        </div>
 
-  <!-- Leaflet JS -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <!-- 로직 -->
-  <script src="app.js"></script>
+        <!-- 지도 -->
+        <div id="map"></div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+    <!-- 상권 추천 로직 JS -->
+    <script src="app.js"></script>
+
 </body>
 </html>
-
-
