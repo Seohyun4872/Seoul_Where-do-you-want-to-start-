@@ -1,486 +1,367 @@
-// ============================
-// 전역변수
-// ============================
-let AREAS = [];                 // areas_for_web.geojson
-let CONFIG = {};                // config.json
-let PREDICTED_MAP = {};         // predicted_money_map.json
+// ==============================
+// 기본 설정
+// ==============================
 
-let GRID_DATA = null;           // grid_250m_4326.geojson
-let BOUNDARY_DATA = null;       // seoul_boundary_4326.geojson
+const map = L.map("map").setView([37.56, 126.97], 11); // 서울 중앙 기준
 
-let map;
-let gridLayer;
-let boundaryLayer;
-let top10Layer = L.layerGroup();
-let topPointsLayer = L.layerGroup();
-let homeLayer = L.layerGroup();
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19,
+  attribution: "&copy; OpenStreetMap contributors",
+}).addTo(map);
 
-// ============================
-// 거리 계산 (Haversine)
-// ============================
-function distanceMeters(lat1, lon1, lat2, lon2) {
-    const R = 6371000;
-    const toRad = d => d * Math.PI / 180;
-    const dLat = toRad(lat2 - lat1);
-    const dLon = toRad(lon2 - lon1);
-    const a =
-        Math.sin(dLat/2)**2 +
-        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-        Math.sin(dLon/2)**2;
+let allFeatures = [];
+let baseLayer = null;
+let highlightLayer = null;
+let layerControl = null;
 
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
+// 상권별 중심 좌표 (집 반경 필터용)
+const centerMap = new Map();
 
-// ============================
-// 스타일 함수들
-// ============================
+// Top 3 마커 레이어
+let topMarkerLayer = null;
 
-// 1) rank에 따라 상권 색상
-function areaStyleFn(feature) {
-    const props = feature.properties || {};
-    let rankVal = props.rank;
+// ==============================
+// GeoJSON 로딩
+// ==============================
 
-    let rnk = null;
-    if (rankVal !== undefined && rankVal !== null) {
-        rnk = parseInt(rankVal, 10);
-        if (isNaN(rnk)) rnk = null;
-    }
+fetch("data/seoul_areas.geojson")
+  .then((res) => res.json())
+  .then((data) => {
+    allFeatures = data.features;
 
-    let color;
-    if (rnk === null) {
-        color = "#cccccc";          // 예외: 회색
-    } else if (1 <= rnk && rnk <= 3) {
-        color = "#e41a1c";          // 진한 빨강
-    } else if (4 <= rnk && rnk <= 7) {
-        color = "#ff7f0e";          // 주황
-    } else if (8 <= rnk && rnk <= 10) {
-        color = "#f781bf";          // 연핑크
-    } else {
-        color = "#cccccc";          // 범위 밖: 회색
-    }
-
-    return {
-        fillColor: color,
-        color: color,
-        weight: 0.7,
-        fillOpacity: 0.5,
-    };
-}
-
-// 2) 격자 레이어 스타일
-function gridStyleFn(feature) {
-    return {
-        fillColor: "transparent",
-        color: "#cccccc",
-        weight: 0.3,
-        fillOpacity: 0,
-        interactive: false
-    };
-}
-
-// 3) 서울 외곽 경계 스타일
-function seoulBoundaryStyleFn(feature) {
-    return {
-        fillColor: "transparent",
-        color: "#000000",
-        weight: 3,
-        fillOpacity: 0,
-        interactive: false
-    };
-}
-
-// ============================
-// 팝업 HTML 생성 (Colab make_popup_text 대응)
-// ============================
-function makePopupHtml(props, rank) {
-    const industry = props["업종_대분류"];
-    const areaName = props["상권_코드_명"];
-
-    const key = `${areaName}||${industry}`;
-    const pm = PREDICTED_MAP[key];
-
-    const pmStr = (pm === null || pm === undefined || isNaN(pm))
-        ? "예상 매출: 정보 없음"
-        : `예상 매출(predicted): ${Number(pm).toLocaleString()} 원`;
-
-    return `
-        🌟 <mark> 순위 ${rank} | ${areaName}</mark><br>
-        업종: ${industry}<br>
-        ${pmStr}<br>
-        최적 휴일: ${props["최적_휴일"]}<br>
-        상권 변화 지표: ${props["상권_변화_지표_명"]}<br>
-        집객시설: ${props["Top1"]}, ${props["Top2"]}
-    `;
-}
-
-// ============================
-// Top10 리스트 텍스트 패널 렌더링
-// ============================
-function renderTop10List(top10) {
-    const container = document.getElementById("top10List");
-    if (!container) return;
-
-    container.innerHTML = "";
-
-    if (!top10 || top10.length === 0) {
-        container.innerHTML = "<p>추천 상권이 없습니다.</p>";
-        return;
-    }
-
-    top10
-        .sort((a, b) => a.properties.rank - b.properties.rank)
-        .forEach(f => {
-            const p = f.properties;
-            const sales = Number(p["점포당_매출_num"]);
-            const formattedSales = isNaN(sales)
-                ? "정보 없음"
-                : sales.toLocaleString() + " 원";
-
-            const div = document.createElement("div");
-            div.className = "top-item";
-
-            div.innerHTML = `
-                <strong>${p.rank}위 | ${p["상권_코드_명"]}</strong><br>
-                피크시간대: ${p["피크_시간대_유형"]}<br>
-                주중/주말: ${p["주중주말_유형"]}<br>
-                가격대: ${p["가격대_유형"]}<br>
-                점포당 매출: ${formattedSales}
-            `;
-
-            container.appendChild(div);
-        });
-}
-
-// ============================
-// 인디케이터 필터링 → Top10
-// ============================
-function filterAreasForTop10(widgets, baseFeatures = null) {
-
-    const selectedIndustry = widgets.industry;
-    const allowedClusters = CONFIG.industry_cluster_map[selectedIndustry] || [];
-
-    // 기본은 전체 상권(AREAS)이지만, baseFeatures가 들어오면 그 안에서만 필터링
-    let df = [...(baseFeatures || AREAS)];
-
-    // 1) 업종 → 클러스터 필터
-    df = df.filter(f => allowedClusters.includes(f.properties.cluster));
-
-    // 2) 피크시간대
-    if (widgets.time !== "선택없음") {
-        df = df.filter(f => f.properties["피크_시간대_유형"] === widgets.time);
-    }
-
-    // 3) 주중/주말
-    if (widgets.weekday !== "선택없음") {
-        df = df.filter(f => f.properties["주중주말_유형"] === widgets.weekday);
-    }
-
-    // 4) 가격대
-    if (widgets.price !== "선택없음") {
-        df = df.filter(f => f.properties["가격대_유형"] === widgets.price);
-    }
-
-    if (df.length === 0) return [];
-
-    // 5) 점포당_매출_num 기준 정렬
-    df = df
-        .map(f => {
-            const sales = Number(f.properties["점포당_매출_num"] || 0);
-            return { feature: f, sales };
-        })
-        .filter(o => !isNaN(o.sales))
-        .sort((a, b) => b.sales - a.sales)
-        .slice(0, 10);
-
-    // rank + 업종_대분류 세팅
-    df.forEach((obj, idx) => {
-        obj.feature.properties.rank = idx + 1;
-        obj.feature.properties["업종_대분류"] = selectedIndustry;
-    });
-
-    return df.map(o => o.feature);
-}
-
-// ============================
-// 지도에 Top10 + TOP1-3 + 집/반경 표시
-// ============================
-function drawTop10(top10, homeX, homeY, radiusKm) {
-    top10Layer.clearLayers();
-    topPointsLayer.clearLayers();
-    homeLayer.clearLayers();
-
-    // 1) 집 + 반경 원
-    if (radiusKm > 0 && !isNaN(homeX) && !isNaN(homeY)) {
-        L.marker([homeY, homeX]).addTo(homeLayer);
-        L.circle([homeY, homeX], { radius: radiusKm * 1000, color: "blue" })
-            .addTo(homeLayer);
-    }
-
-    homeLayer.addTo(map);
-
-    // 2) Top10 상권 폴리곤
-    const top10Sorted = [...top10].sort((a, b) => a.properties.rank - b.properties.rank);
-
-    top10Sorted.forEach((f) => {
-        const rank = f.properties.rank;
-        const popupHtml = makePopupHtml(f.properties, rank);
-
-        const layer = L.geoJSON(f, {
-            style: areaStyleFn,
-            onEachFeature: (feature, lyr) => {
-                const tt = `순위 ${rank} | ${feature.properties["상권_코드_명"]}`;
-                lyr.bindTooltip(tt, { sticky: true });
-                lyr.bindPopup(popupHtml, { maxWidth: 400 });
-            }
-        });
-
-        layer.addTo(top10Layer);
-    });
-
-    top10Layer.addTo(map);
-
-    // 3) TOP1-3 포인터 (별 마커)
-    const starIcon = L.divIcon({
-        html: "⭐",
-        className: "top-star-icon",
-        iconSize: [24, 24],
-        iconAnchor: [12, 12]
-    });
-
-    top10Sorted.forEach(f => {
-        const rnk = f.properties.rank;
-        if (rnk > 3) return;
-
-        const lat = f.properties.center_lat;
-        const lon = f.properties.center_lon;
-        const popupHtml = makePopupHtml(f.properties, rnk);
-
-        L.marker([lat, lon], {
-            icon: starIcon,
-            title: `TOP${rnk}: ${f.properties["상권_코드_명"]}`
-        })
-        .bindPopup(popupHtml, { maxWidth: 400 })
-        .addTo(topPointsLayer);
-    });
-
-    topPointsLayer.addTo(map);
-
-    // 4) 왼쪽 리스트 패널도 같이 업데이트
-    renderTop10List(top10);
-}
-
-// ============================
-// 메인 init
-// ============================
-async function init() {
-
-    // 1) 지도 생성
-    map = L.map("map").setView([37.5665, 126.9780], 11);
-
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-        maxZoom: 19
+    // 1) 전체 상권을 연한 색으로 배경에 깔기
+    baseLayer = L.geoJSON(data, {
+      style: {
+        color: "#999",
+        weight: 1,
+        fillOpacity: 0.1,
+      },
+      onEachFeature: (feature, layer) => {
+        const p = feature.properties;
+        layer.bindPopup(`
+          <b>${p["상권_코드_명"]}</b><br/>
+          클러스터: ${p["cluster"] ?? "-"}<br/>
+          피크 시간대: ${p["피크_시간대_유형"] ?? "-"}<br/>
+          주중/주말: ${p["주중주말_유형"] ?? "-"}<br/>
+          가격대: ${p["가격대_유형"] ?? "-"}<br/>
+          평균 점포당 조정 매출: ${
+            p["평균_점포당_조정_매출"]
+              ? p["평균_점포당_조정_매출"].toLocaleString() + "원"
+              : "정보 없음"
+          }
+        `);
+      },
     }).addTo(map);
 
-    // 2) 최소 필수 데이터 3개 먼저 로드
-    let areasData, configData, predData;
-    try {
-        [areasData, configData, predData] = await Promise.all([
-            fetch("./data/areas_for_web.geojson").then(r => {
-                if (!r.ok) throw new Error("areas_for_web.geojson 로드 실패");
-                return r.json();
-            }),
-            fetch("./data/config.json").then(r => {
-                if (!r.ok) throw new Error("config.json 로드 실패");
-                return r.json();
-            }),
-            fetch("./data/predicted_money_map.json").then(r => {
-                if (!r.ok) throw new Error("predicted_money_map.json 로드 실패");
-                return r.json();
-            }),
-        ]);
-    } catch (e) {
-        console.error("❌ 필수 데이터 로드 중 오류:", e);
-        alert("필수 데이터 파일을 불러오지 못했습니다. console을 확인해 주세요.");
-        return;
+    // 1-1) 상권 중심점 계산해서 저장 (집 반경 필터 + Top 마커용)
+    baseLayer.eachLayer((layer) => {
+      const f = layer.feature;
+      const p = f.properties;
+      const center = layer.getBounds().getCenter(); // polygon의 중심
+      centerMap.set(p["상권_코드_명"], center);
+    });
+
+    // 1-2) 레이어 컨트롤 생성 (전체 상권 오버레이 등록)
+    const overlayMaps = {
+      "전체 상권": baseLayer,
+    };
+
+    layerControl = L.control.layers(null, overlayMaps, {
+      collapsed: false,
+    }).addTo(map);
+
+    // 2) 드롭다운 옵션 채우기
+    fillIndicatorOptions(allFeatures);
+  })
+  .catch((err) => {
+    console.error("GeoJSON 로드 실패:", err);
+  });
+
+// ==============================
+// 인디케이터 옵션 채우기
+// ==============================
+
+function getUniqueValues(features, field) {
+  const set = new Set();
+  features.forEach((f) => {
+    const v = f.properties[field];
+    if (v !== null && v !== undefined && v !== "") {
+      set.add(v);
     }
-
-    AREAS = areasData.features;
-    CONFIG = configData;
-    PREDICTED_MAP = predData;
-
-    // 3) 격자 / 경계는 있으면 쓰고, 없으면 경고만 찍고 넘어가기
-    try {
-        const gridRes = await fetch("./data/grid_250m_4326.geojson");
-        if (gridRes.ok) {
-            GRID_DATA = await gridRes.json();
-            gridLayer = L.geoJSON(GRID_DATA, {
-                style: gridStyleFn,
-                interactive: false
-            }).addTo(map);
-        } else {
-            console.warn("⚠ grid_250m_4326.geojson 없음 (지금은 건너뜀)");
-        }
-    } catch (e) {
-        console.warn("⚠ grid_250m_4326.geojson 로드 실패 (지금은 건너뜀)", e);
-    }
-
-    try {
-        const boundaryRes = await fetch("./data/seoul_boundary_4326.geojson");
-        if (boundaryRes.ok) {
-            BOUNDARY_DATA = await boundaryRes.json();
-            boundaryLayer = L.geoJSON(BOUNDARY_DATA, {
-                style: seoulBoundaryStyleFn,
-                interactive: false
-            }).addTo(map);
-        } else {
-            console.warn("⚠ seoul_boundary_4326.geojson 없음 (지금은 건너뜀)");
-        }
-    } catch (e) {
-        console.warn("⚠ seoul_boundary_4326.geojson 로드 실패 (지금은 건너뜀)", e);
-    }
-
-    // 4) 드롭다운 채우기
-    const industrySel = document.getElementById("industry");
-    const timeSel = document.getElementById("time");
-    const weekdaySel = document.getElementById("weekday");
-    const priceSel = document.getElementById("price");
-    const proximitySel = document.getElementById("proximity");
-
-    Object.keys(CONFIG.industry_cluster_map).forEach(k => {
-        const op = document.createElement("option");
-        op.value = k;
-        op.textContent = k;
-        industrySel.appendChild(op);
-    });
-
-    CONFIG.time_options.forEach(v => {
-        const op = document.createElement("option");
-        op.value = v;
-        op.textContent = v;
-        timeSel.appendChild(op);
-    });
-
-    CONFIG.weekday_options.forEach(v => {
-        const op = document.createElement("option");
-        op.value = v;
-        op.textContent = v;
-        weekdaySel.appendChild(op);
-    });
-
-    CONFIG.price_options.forEach(v => {
-        const op = document.createElement("option");
-        op.value = v;
-        op.textContent = v;
-        priceSel.appendChild(op);
-    });
-
-    // 5) LayerControl
-    const overlayMaps = {};
-    if (gridLayer) overlayMaps["Grid (격자)"] = gridLayer;
-    if (boundaryLayer) overlayMaps["서울 외곽 경계"] = boundaryLayer;
-    overlayMaps["Top10 상권"] = top10Layer;
-    overlayMaps["TOP1-3 포인터"] = topPointsLayer;
-    overlayMaps["집/반경"] = homeLayer;
-
-    L.control.layers(null, overlayMaps, { collapsed: false }).addTo(map);
-
-    // 6) 버튼 클릭 이벤트 (직주근접 모드 반영)
-    document.getElementById("runBtn").addEventListener("click", () => {
-
-        const widgets = {
-            industry: industrySel.value,
-            time: timeSel.value,
-            weekday: weekdaySel.value,
-            price: priceSel.value,
-        };
-
-        const homeXVal = document.getElementById("homeX").value;
-        const homeYVal = document.getElementById("homeY").value;
-        const radiusVal = document.getElementById("radius").value;
-        const proximityMode = proximitySel.value;   // "any" / "near" / "far"
-
-        const homeX = parseFloat(homeXVal);
-        const homeY = parseFloat(homeYVal);
-        const radiusKm = parseFloat(radiusVal);
-
-        console.log("🏠 homeX, homeY, radiusKm, mode =", homeX, homeY, radiusKm, proximityMode);
-
-        // 1) 거리 기반으로 먼저 상권 후보 필터링
-        let baseFeatures = [...AREAS];
-        let useHome = false;
-
-        // (1) 직주근접 상관없음 → 집/반경 정보 안 씀
-        if (proximityMode === "any") {
-            useHome = false;
-        } else {
-            // (2) near / far 인데 집 좌표 or 반경이 이상하면 에러
-            if (
-                homeXVal === "" || homeYVal === "" ||
-                isNaN(homeX) || isNaN(homeY) ||
-                isNaN(radiusKm) || radiusKm <= 0
-            ) {
-                alert("직주근접/분리를 사용하려면 집 X,Y 좌표와 반경(km)을 올바르게 입력해 주세요.");
-                return;
-            }
-
-            useHome = true;
-            const radiusM = radiusKm * 1000;
-
-            baseFeatures = baseFeatures
-                .map(f => {
-                    const lat = Number(f.properties.center_lat);
-                    const lon = Number(f.properties.center_lon);
-                    const d = distanceMeters(homeY, homeX, lat, lon);
-                    return { feature: f, dist: d };
-                })
-                .filter(obj => !isNaN(obj.dist))
-                .filter(obj => {
-                    if (proximityMode === "near") {
-                        // 반경 이내 = 직주근접
-                        return obj.dist <= radiusM;
-                    } else {
-                        // 반경 밖 = 직주분리
-                        return obj.dist > radiusM;
-                    }
-                })
-                .map(obj => obj.feature);
-
-            if (baseFeatures.length === 0) {
-                if (proximityMode === "near") {
-                    alert(`집 기준 반경 ${radiusKm}km 이내(근접)에 존재하는 상권이 없습니다.\n반경을 키우거나 조건을 완화해 보세요.`);
-                } else {
-                    alert(`집 기준 반경 ${radiusKm}km 밖(비근접)에 존재하는 상권이 없습니다.\n반경을 줄이거나 조건을 완화해 보세요.`);
-                }
-                // 그래도 집 위치 + 링만 보여주고 종료
-                drawTop10([], homeX, homeY, radiusKm);
-                return;
-            }
-        }
-
-        // 2) 인디케이터 조건에 맞게 Top10 뽑기 (baseFeatures 내에서만)
-        let top10 = filterAreasForTop10(widgets, baseFeatures);
-
-        if (top10.length === 0) {
-            alert("선택한 조건에 해당하는 상권이 없습니다.\n인디케이터를 조금 완화해서 다시 설정해 주세요.");
-            top10Layer.clearLayers();
-            topPointsLayer.clearLayers();
-            homeLayer.clearLayers();
-            renderTop10List([]);
-            return;
-        }
-
-        if (top10.length > 10) {
-            top10 = top10.slice(0, 10);
-        }
-
-        // 3) 지도 & 리스트 갱신
-        drawTop10(
-            top10,
-            useHome ? homeX : NaN,
-            useHome ? homeY : NaN,
-            useHome ? radiusKm : 0
-        );
-    });
+  });
+  return Array.from(set).sort();
 }
 
-init();
+function appendOptions(selectEl, values) {
+  values.forEach((v) => {
+    const opt = document.createElement("option");
+    opt.value = v;
+    opt.textContent = v;
+    selectEl.appendChild(opt);
+  });
+}
+
+function fillIndicatorOptions(features) {
+  const industrySelect = document.getElementById("industrySelect");
+  const timeSelect = document.getElementById("timeSelect");
+  const weekdaySelect = document.getElementById("weekdaySelect");
+  const priceSelect = document.getElementById("priceSelect");
+
+  const industryField = "서비스_업종_코드_명"; // 실제 컬럼명 확인
+  const timeField = "피크_시간대_유형";
+  const weekdayField = "주중주말_유형";
+  const priceField = "가격대_유형";
+
+  if (features[0]?.properties[industryField] !== undefined) {
+    appendOptions(industrySelect, getUniqueValues(features, industryField));
+  } else {
+    industrySelect.disabled = true;
+  }
+
+  appendOptions(timeSelect, getUniqueValues(features, timeField));
+  appendOptions(weekdaySelect, getUniqueValues(features, weekdayField));
+  appendOptions(priceSelect, getUniqueValues(features, priceField));
+}
+
+// ==============================
+// 추천 로직
+// ==============================
+
+document.getElementById("runBtn").addEventListener("click", () => {
+  if (!allFeatures.length) return;
+
+  const industrySelect = document.getElementById("industrySelect");
+  const timeSelect = document.getElementById("timeSelect");
+  const weekdaySelect = document.getElementById("weekdaySelect");
+  const priceSelect = document.getElementById("priceSelect");
+
+  const homeXInput = document.getElementById("homeX");
+  const homeYInput = document.getElementById("homeY");
+  const radiusSelect = document.getElementById("radiusSelect");
+
+  const industry = industrySelect.value;
+  const time = timeSelect.value;
+  const weekday = weekdaySelect.value;
+  const price = priceSelect.value;
+
+  const industryField = "서비스_업종_코드_명";
+  const timeField = "피크_시간대_유형";
+  const weekdayField = "주중주말_유형";
+  const priceField = "가격대_유형";
+  const salesField = "평균_점포당_조정_매출";
+
+  // 🏠 집 좌표 + 반경 읽기
+  const homeX = parseFloat(homeXInput.value);
+  const homeY = parseFloat(homeYInput.value);
+  const radiusKm = parseFloat(radiusSelect.value);
+
+  const useHome =
+    !Number.isNaN(homeX) &&
+    !Number.isNaN(homeY) &&
+    homeX !== 0 &&
+    homeY !== 0;
+
+  let homeLatLng = null;
+  if (useHome) {
+    homeLatLng = L.latLng(homeY, homeX);
+  }
+
+  // 1) 필터링 (인디케이터 + 집 반경 AND 조건)
+  let filtered = allFeatures.filter((f) => {
+    const p = f.properties;
+
+    // 업종
+    if (industry !== "ALL" && !industrySelect.disabled) {
+      if (p[industryField] !== industry) return false;
+    }
+    // 피크 시간대
+    if (time !== "ALL" && p[timeField] !== time) return false;
+    // 주중/주말
+    if (weekday !== "ALL" && p[weekdayField] !== weekday) return false;
+    // 가격대
+    if (price !== "ALL" && p[priceField] !== price) return false;
+
+    // 🏠 집 반경 필터
+    if (useHome) {
+      const center = centerMap.get(p["상권_코드_명"]);
+      if (!center) return false;
+      const distMeters = map.distance(homeLatLng, center);
+      if (distMeters > radiusKm * 1000) return false;
+    }
+
+    return true;
+  });
+
+  // 2) 매출 기준 내림차순 정렬
+  filtered.sort((a, b) => {
+    const aVal = Number(a.properties[salesField] || 0);
+    const bVal = Number(b.properties[salesField] || 0);
+    return bVal - aVal;
+  });
+
+  // 3) Top10만 사용
+  const topN = filtered.slice(0, 10);
+
+  updateHighlightLayer(topN, { useHome, radiusKm, homeLatLng });
+  updateResultTable(topN, { industry, time, weekday, price, useHome, radiusKm });
+});
+
+// ==============================
+// 지도 강조 레이어 갱신 + Top3 마커
+// ==============================
+
+function updateHighlightLayer(topFeatures, options) {
+  // 이전 추천 레이어 제거
+  if (highlightLayer) {
+    map.removeLayer(highlightLayer);
+    if (layerControl) {
+      layerControl.removeLayer(highlightLayer);
+    }
+  }
+
+  // 이전 Top3 마커 레이어 제거
+  if (topMarkerLayer) {
+    map.removeLayer(topMarkerLayer);
+    if (layerControl) {
+      layerControl.removeLayer(topMarkerLayer);
+    }
+  }
+
+  if (!topFeatures.length) return;
+
+  highlightLayer = L.geoJSON(topFeatures, {
+    style: {
+      color: "red",
+      weight: 3,
+      fillOpacity: 0.4,
+    },
+    onEachFeature: (feature, layer) => {
+      const p = feature.properties;
+      layer.bindPopup(`
+        <b>${p["상권_코드_명"]}</b><br/>
+        평균 점포당 조정 매출: ${
+          p["평균_점포당_조정_매출"]
+            ? p["평균_점포당_조정_매출"].toLocaleString() + "원"
+            : "정보 없음"
+        }<br/>
+        클러스터: ${p["cluster"] ?? "-"}<br/>
+        피크 시간대: ${p["피크_시간대_유형"] ?? "-"}<br/>
+        주중/주말: ${p["주중주말_유형"] ?? "-"}<br/>
+        가격대: ${p["가격대_유형"] ?? "-"}
+      `);
+    },
+  }).addTo(map);
+
+  // 레이어 컨트롤에 "추천 상권" 등록
+  if (layerControl) {
+    layerControl.addOverlay(highlightLayer, "추천 상권");
+  }
+
+  // ⭐ Top 3 마커 찍기
+  topMarkerLayer = L.layerGroup().addTo(map);
+
+  const topCount = Math.min(3, topFeatures.length);
+  for (let i = 0; i < topCount; i++) {
+    const f = topFeatures[i];
+    const p = f.properties;
+    const center = centerMap.get(p["상권_코드_명"]);
+    if (!center) continue;
+
+    const marker = L.marker(center, {
+      icon: L.divIcon({
+        className: "top-marker",
+        html: `<div class="top-marker-inner">${i + 1}</div>`,
+        iconSize: [26, 26],
+        iconAnchor: [13, 13],
+      }),
+    });
+
+    marker.bindPopup(`TOP ${i + 1} - ${p["상권_코드_명"]}`);
+    marker.addTo(topMarkerLayer);
+  }
+
+  if (layerControl) {
+    layerControl.addOverlay(topMarkerLayer, "Top 3 마커");
+  }
+
+  // TOP 상권들 중심으로 줌 맞추기
+  const bounds = highlightLayer.getBounds();
+  if (bounds.isValid()) {
+    map.fitBounds(bounds.pad(0.2));
+  }
+}
+
+// ==============================
+// 오른쪽 결과 표/요약
+// ==============================
+
+function updateResultTable(topFeatures, options) {
+  const { industry, time, weekday, price, useHome, radiusKm } = options;
+  const resultDiv = document.getElementById("result");
+
+  if (!topFeatures.length) {
+    resultDiv.innerHTML = `
+      <p>⚠ 선택한 조건에 해당하는 상권이 없습니다.<br/>
+      인디케이터 또는 반경 조건을 조금 완화해서 다시 시도해 보세요.</p>
+    `;
+    return;
+  }
+
+  const summaryHtml = `
+    <p>
+      <b>추천 결과</b><br/>
+      업종: ${industry === "ALL" ? "전체" : industry}<br/>
+      피크 시간대: ${time === "ALL" ? "전체" : time}<br/>
+      주중/주말: ${weekday === "ALL" ? "전체" : weekday}<br/>
+      가격대: ${price === "ALL" ? "전체" : price}<br/>
+      ${
+        useHome
+          ? `반경: ${radiusKm} km 이내 상권만 포함`
+          : `반경 조건: 사용 안 함`
+      }
+    </p>
+    <p>조건에 가장 잘 맞는 상권 Top ${topFeatures.length} 목록입니다.</p>
+  `;
+
+  const rowsHtml = topFeatures
+    .map((f, idx) => {
+      const p = f.properties;
+      return `
+        <tr>
+          <td>${idx + 1}</td>
+          <td>${p["상권_코드_명"]}</td>
+          <td>${
+            p["평균_점포당_조정_매출"]
+              ? p["평균_점포당_조정_매출"].toLocaleString() + "원"
+              : "-"
+          }</td>
+          <td>${p["cluster"] ?? "-"}</td>
+          <td>${p["피크_시간대_유형"] ?? "-"}</td>
+          <td>${p["주중주말_유형"] ?? "-"}</td>
+          <td>${p["가격대_유형"] ?? "-"}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  const tableHtml = `
+    <table>
+      <thead>
+        <tr>
+          <th>순위</th>
+          <th>상권명</th>
+          <th>평균 매출</th>
+          <th>클러스터</th>
+          <th>피크 시간대</th>
+          <th>주중/주말</th>
+          <th>가격대</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rowsHtml}
+      </tbody>
+    </table>
+  `;
+
+  resultDiv.innerHTML = summaryHtml + tableHtml;
+}
