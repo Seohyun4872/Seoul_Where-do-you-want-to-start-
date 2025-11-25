@@ -8,6 +8,8 @@ let PREDICTED_MAP = {};         // predicted_money_map.json
 let GRID_DATA = null;           // grid_250m_4326.geojson
 let BOUNDARY_DATA = null;       // seoul_boundary_4326.geojson
 
+let INDUSTRY_SENTENCES = {};    // 업종별 설명 문장 매핑
+
 let map;
 let gridLayer;
 let boundaryLayer;
@@ -166,6 +168,28 @@ function renderTop10List(top10) {
 }
 
 // ============================
+// 업종별 설명 문장 렌더링
+// ============================
+function renderIndustrySentence(industry) {
+    const el = document.getElementById("industrySentence");
+    if (!el) return;
+
+    if (!industry) {
+        el.textContent = "업종을 선택하고 “상권 추천” 버튼을 누르면 설명이 표시됩니다.";
+        return;
+    }
+
+    const key = String(industry).trim();
+    const sentence = INDUSTRY_SENTENCES[key];
+
+    if (sentence) {
+        el.textContent = "👉 " + sentence;
+    } else {
+        el.textContent = "해당 업종에 대한 설명 문장이 등록되어 있지 않습니다.";
+    }
+}
+
+// ============================
 // 인디케이터 필터링 → Top10
 // ============================
 function filterAreasForTop10(widgets, baseFeatures = null) {
@@ -273,8 +297,8 @@ function drawTop10(top10, homeX, homeY, radiusKm) {
             icon: icon,
             title: `TOP${rnk}: ${f.properties["상권_코드_명"]}`
         })
-        .bindPopup(popupHtml, { maxWidth: 400 })
-        .addTo(topPointsLayer);
+            .bindPopup(popupHtml, { maxWidth: 400 })
+            .addTo(topPointsLayer);
     });
 
     topPointsLayer.addTo(map);
@@ -295,10 +319,10 @@ async function init() {
         maxZoom: 19
     }).addTo(map);
 
-    // 2) 최소 필수 데이터 3개 먼저 로드
-    let areasData, configData, predData;
+    // 2) 최소 필수 데이터 + 업종 문장 로드
+    let areasData, configData, predData, sentenceData;
     try {
-        [areasData, configData, predData] = await Promise.all([
+        [areasData, configData, predData, sentenceData] = await Promise.all([
             fetch("./data/areas_for_web.geojson").then(r => {
                 if (!r.ok) throw new Error("areas_for_web.geojson 로드 실패");
                 return r.json();
@@ -311,6 +335,13 @@ async function init() {
                 if (!r.ok) throw new Error("predicted_money_map.json 로드 실패");
                 return r.json();
             }),
+            fetch("./data/industry_sentences.json").then(r => {
+                if (!r.ok) {
+                    console.warn("⚠ industry_sentences.json 로드 실패 (업종 설명 없음 상태로 진행)");
+                    return [];
+                }
+                return r.json();
+            }),
         ]);
     } catch (e) {
         console.error("❌ 필수 데이터 로드 중 오류:", e);
@@ -321,6 +352,18 @@ async function init() {
     AREAS = areasData.features;
     CONFIG = configData;
     PREDICTED_MAP = predData;
+
+    // 업종별 문장: records 리스트 → {업종: 문장} 딕셔너리로 변환
+    INDUSTRY_SENTENCES = {};
+    if (Array.isArray(sentenceData)) {
+        sentenceData.forEach(row => {
+            const name = String(row["업종"] ?? "").trim();
+            const text = row["문장"];
+            if (name && text) {
+                INDUSTRY_SENTENCES[name] = text;
+            }
+        });
+    }
 
     // 3) 격자 / 경계는 있으면 쓰고, 없으면 경고만 찍고 넘어가기
     try {
@@ -430,14 +473,9 @@ async function init() {
 
         // 1) 거리 기반으로 먼저 상권 후보 필터링
         let baseFeatures = [...AREAS];
-        let useHomeDistance = false;
 
-        // (1) 직주근접 상관없음이거나 집 정보가 없으면 → 거리 필터 사용 안 함
-        if (proximityMode === "any" || !hasHome) {
-            useHomeDistance = false;
-        } else {
-            // (2) near / far + 집 정보 있음 → 거리 필터 사용
-            useHomeDistance = true;
+        // 직주근접 상관없음이거나 집 정보가 없으면 → 거리 필터 사용 안 함
+        if (!(proximityMode === "any" || !hasHome)) {
             const radiusM = radiusKm * 1000;
 
             baseFeatures = baseFeatures
@@ -467,6 +505,8 @@ async function init() {
                 }
                 // 그래도 집 위치 + 링만 보여주고 종료
                 drawTop10([], hasHome ? homeX : NaN, hasHome ? homeY : NaN, hasHome ? radiusKm : 0);
+                renderTop10List([]);
+                renderIndustrySentence(widgets.industry);
                 return;
             }
         }
@@ -480,6 +520,7 @@ async function init() {
             topPointsLayer.clearLayers();
             homeLayer.clearLayers();
             renderTop10List([]);
+            renderIndustrySentence(null);
             return;
         }
 
@@ -494,8 +535,10 @@ async function init() {
             hasHome ? homeY : NaN,
             hasHome ? radiusKm : 0
         );
+
+        // 4) 업종별 설명 문장 업데이트
+        renderIndustrySentence(widgets.industry);
     });
 }
 
 init();
-
