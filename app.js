@@ -32,9 +32,7 @@ function distanceMeters(lat1, lon1, lat2, lon2) {
 }
 
 // ============================
-// "선
-::contentReference[oaicite:0]{index=0}
-택 없음" 처리용 함수
+// "선택 없음" 처리용 함수
 // ============================
 function isNoFilter(val) {
     return (
@@ -225,7 +223,7 @@ function drawTop10(top10, homeX, homeY, radiusKm) {
     topPointsLayer.clearLayers();
     homeLayer.clearLayers();
 
-    // 1) 집 + 반경 원
+    // 1) 집 + 반경 원 (좌표만 제대로 들어오면 proximity 상관없이 항상 그림)
     if (radiusKm > 0 && !isNaN(homeX) && !isNaN(homeY)) {
         L.marker([homeY, homeX]).addTo(homeLayer);
         L.circle([homeY, homeX], { radius: radiusKm * 1000, color: "blue" })
@@ -421,25 +419,25 @@ async function init() {
 
         console.log("🏠 homeX, homeY, radiusKm, mode =", homeX, homeY, radiusKm, proximityMode);
 
+        // 집 좌표/반경이 유효한지 여부
+        const hasHome =
+            homeXVal !== "" &&
+            homeYVal !== "" &&
+            !isNaN(homeX) &&
+            !isNaN(homeY) &&
+            !isNaN(radiusKm) &&
+            radiusKm > 0;
+
         // 1) 거리 기반으로 먼저 상권 후보 필터링
         let baseFeatures = [...AREAS];
-        let useHome = false;
+        let useHomeDistance = false;
 
-        // (1) 직주근접 상관없음 → 집/반경 정보 안 씀
-        if (proximityMode === "any") {
-            useHome = false;
+        // (1) 직주근접 상관없음이거나 집 정보가 없으면 → 거리 필터 사용 안 함
+        if (proximityMode === "any" || !hasHome) {
+            useHomeDistance = false;
         } else {
-            // (2) near / far 인데 집 좌표 or 반경이 이상하면 에러
-            if (
-                homeXVal === "" || homeYVal === "" ||
-                isNaN(homeX) || isNaN(homeY) ||
-                isNaN(radiusKm) || radiusKm <= 0
-            ) {
-                alert("직주근접/분리를 사용하려면 집 X,Y 좌표와 반경(km)을 올바르게 입력해 주세요.");
-                return;
-            }
-
-            useHome = true;
+            // (2) near / far + 집 정보 있음 → 거리 필터 사용
+            useHomeDistance = true;
             const radiusM = radiusKm * 1000;
 
             baseFeatures = baseFeatures
@@ -468,7 +466,7 @@ async function init() {
                     alert(`집 기준 반경 ${radiusKm}km 밖(비근접)에 존재하는 상권이 없습니다.\n반경을 줄이거나 조건을 완화해 보세요.`);
                 }
                 // 그래도 집 위치 + 링만 보여주고 종료
-                drawTop10([], homeX, homeY, radiusKm);
+                drawTop10([], hasHome ? homeX : NaN, hasHome ? homeY : NaN, hasHome ? radiusKm : 0);
                 return;
             }
         }
@@ -492,11 +490,12 @@ async function init() {
         // 3) 지도 & 리스트 갱신
         drawTop10(
             top10,
-            useHome ? homeX : NaN,
-            useHome ? homeY : NaN,
-            useHome ? radiusKm : 0
+            hasHome ? homeX : NaN,
+            hasHome ? homeY : NaN,
+            hasHome ? radiusKm : 0
         );
     });
 }
 
 init();
+
