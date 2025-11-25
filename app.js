@@ -178,7 +178,7 @@ function drawTop10(top10, homeX, homeY, radiusKm) {
     }
 
     homeLayer.addTo(map);
-
+    
     // 2) Top10 상권 폴리곤
     const top10Sorted = [...top10].sort((a, b) => a.properties.rank - b.properties.rank);
 
@@ -202,9 +202,44 @@ function drawTop10(top10, homeX, homeY, radiusKm) {
 
     top10Layer.addTo(map);
 
+function renderTop10List(top10) {
+    const container = document.getElementById("top10List");
+    container.innerHTML = "";
+
+    if (!top10 || top10.length === 0) {
+        container.innerHTML = "<p>추천 상권이 없습니다.</p>";
+        return;
+    }
+
+    top10
+        .sort((a, b) => a.properties.rank - b.properties.rank)
+        .forEach(f => {
+            const p = f.properties;
+
+            const sales = Number(p["점포당_매출_num"]);
+            const formattedSales = isNaN(sales)
+                ? "정보 없음"
+                : sales.toLocaleString() + " 원";
+
+            const div = document.createElement("div");
+            div.className = "top-item";
+
+            div.innerHTML = `
+                <strong>${p.rank}위 | ${p["상권_코드_명"]}</strong><br>
+                피크시간대: ${p["피크_시간대_유형"]}<br>
+                주중/주말: ${p["주중주말_유형"]}<br>
+                가격대: ${p["가격대_유형"]}<br>
+                점포당 매출: ${formattedSales}
+            `;
+
+            container.appendChild(div);
+        });
+}
+
+
     // 3) TOP1-3 포인터 (별 마커)
     const starIcon = L.divIcon({
-        html: "⭐",
+        html: "🎯",
         className: "top-star-icon",
         iconSize: [24, 24],
         iconAnchor: [12, 12]
