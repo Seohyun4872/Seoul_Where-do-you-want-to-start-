@@ -315,7 +315,8 @@ async function init() {
     // 1) 지도 생성
     map = L.map("map").setView([37.5665, 126.9780], 11);
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    L.tileLayer('https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png?key=cb1_4xnd_1_2f0690a97ee28141bc531909', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, &copy; <a href="https://carto.com/attribution/">CARTO</a>',
         maxZoom: 19
     }).addTo(map);
 
