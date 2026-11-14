@@ -12,6 +12,40 @@ Choosing where to open a restaurant involves more than finding an area with high
 
 This indicator lets users explore those conditions together and view matching areas on a map.
 
+## Team project and my role
+
+A **team project for the DArt-B Fall 2025 Academic Showcase**.
+
+- **Team members:** 김미정, 김태연, 권남정, 노동희, 박서현, 신혜성
+- **Seohyun Park's role:** Data preprocessing and implementation of the web-based startup indicator
+
+The team worked on commercial-area analysis and indicator design. My responsibilities covered preprocessing the analysis data and building the web interface that lets users explore the final results through location and operating-preference filters.
+
+## Data sources
+
+| Item | Details |
+| --- | --- |
+| Source | Seoul commercial-area public datasets from the [Seoul Open Data Plaza](https://data.seoul.go.kr/) |
+| Reference period | Q4 2024 |
+| Integration keys | Commercial-area and business-category identifiers |
+| Main inputs | Sales, transactions, store counts, floating/resident/working populations, income, expenditure, facilities, and commercial-area change indicators |
+| Final analysis sample | 1,026 commercial areas with at least three food-service categories |
+
+## Analytical approach
+
+| Stage | Method and purpose |
+| --- | --- |
+| Missing values | Checked component values against totals before assigning zeros. Used earlier observations from the same area where available and random forest regression for remaining gaps. For expenditure fields, estimated totals and component shares to preserve consistency. |
+| Outlier review | Checked total sales against time-slot sales, alongside store counts and operating patterns. Reviewed unusually large values and zeros in context. |
+| Business-type clusters | Applied Robust scaling and PCA to category sales shares, then formed ten K-means clusters. Compared configurations with Silhouette, Calinski–Harabasz, and Davies–Bouldin metrics and mapped business categories to clusters using their profiles. |
+| Price positioning | Compared category-specific K-means, Gaussian mixture models, and IQR-based methods to define budget, mid-range, and premium groups. |
+| Trading hours | Used the Friedman test to examine differences in time-slot sales and distribution-based thresholds to distinguish lunch, evening, late-night, and balanced patterns. |
+| Trading days | Defined Friday–Saturday as the analytical weekend and Sunday–Thursday as weekdays based on observed patterns. Used average daily sales, MinMax scaling, HDBSCAN, and IQR thresholds to identify weekday/weekend/balanced and stronger patterns. |
+| Population indicators | Examined floating, resident, and working-population variables. Checked multicollinearity with VIF and selected variables whose importance appeared across multiple models for the industry explanations. |
+| Days off and context | Examined sales differences across days and clusters to suggest possible days off. Added facility and commercial-area change information to help interpret locations. |
+
+The presentation defines an **adjusted representative sales indicator** using sales per store, local category sales shares, and location quotients (LQ). The current website orders recommendations using the stored `점포당_매출_num` field. Popup sales estimates come from a separate data lookup.
+
 ## What you can do
 
 | Feature | What it shows |
@@ -57,3 +91,11 @@ This repository contains the web presentation of the analysis results: a filter-
 | [data/industry_sentences.json](data/industry_sentences.json) | Business-type explanations |
 
 The map is an exploratory aid for comparing candidate locations. Sales values and rankings reflect the supplied analysis data rather than a live market feed or guaranteed future revenue.
+
+## References
+
+References listed in the team's presentation. Original Korean titles are retained for identification.
+
+1. 간형식, 양재형, 안영진(2020). 「국내 외식 자영업의 문제점 연구와 마케팅 극복전략」. 상품학연구, 38(3), 89–98.
+2. 김양기(2024). 「자영업자의 창업준비과정이 경영성과에 미치는 영향에 관한 연구」. 산업혁신연구, 40(2), 254–265.
+3. 오흥록, 배범석, 문혜정(2017). 「빅데이터 분석을 통한 서울시 골목상권 분석」. 한국경영학회 융합학술대회, 2017(8), 344–372.
